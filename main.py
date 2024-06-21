@@ -3,15 +3,32 @@ from tkinter import ttk, scrolledtext, filedialog
 import subprocess
 import GOGlobal
 import os
+import myUtils
 
-DEFAULT_SYMBOL_PATH = "C:\\Users\\Matt\\Documents\\Tools\\Symbols"
+DEFAULT_SYMBOL_BASE_PATH = "C:\\Users\\Matt\\Documents\\Tools\\Symbols"
 
 class MemoryDumpAnalyzerApp(tk.Tk):
+    """
+    MemoryDumpAnalyzerApp class for analyzing memory dumps with specified parameters.
+
+    Methods:
+    - __init__: Initializes the MemoryDumpAnalyzerApp class and sets up the GUI layout.
+    - createWidgets: Creates all the necessary widgets for the GUI.
+    - browse_file: Opens a file dialog for browsing memory dump files.
+    - get_symbol_path: Generates the symbol path based on selected parameters.
+    - analyze: Analyzes the memory dump using specified parameters and displays the output.
+
+    Raises:
+    - subprocess.CalledProcessError: If an error occurs during the subprocess execution.
+
+    Returns:
+    - None
+    """
     def __init__(self):
         super().__init__()
 
         self.title("Memory Dump Analyzer")
-        self.geometry("800x600")
+        self.geometry("1200x800")
 
         # Configure grid layout to expand
         self.columnconfigure(0, weight=1)
@@ -116,7 +133,17 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         else:
             return "No symbols found. "
 
+    
     def analyze(self):
+        """
+        Analyzes the memory dump using the specified parameters and displays the output in the output text box.
+
+        Raises:
+            subprocess.CalledProcessError: If an error occurs during the subprocess execution.
+
+        Returns:
+            None
+        """
         gg_version = self.go_global_var.get()
         dump_type = self.dump_type_var.get()
         app_type = self.app_type_var.get()
@@ -125,8 +152,11 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         if not gg_version or not dump_type or not app_type or not memory_dump_path:
             self.output_text.insert(tk.END, "Please fill all fields.\n")
             return
+       
+        # Think of a way to allow users to set the sy this if they need to
+        symbol_base_path = DEFAULT_SYMBOL_BASE_PATH 
 
-        command = f'DumpChk [-y {self.get_symbol_path(DEFAULT_SYMBOL_PATH)}] {memory_dump_path}'
+        command = f'DumpChk [-y {self.get_symbol_path(symbol_base_path)}] {memory_dump_path}'
         self.output_text.insert(tk.END, f"Running command: {command}\n")
 
         try:
