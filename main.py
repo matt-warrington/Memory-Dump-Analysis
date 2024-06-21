@@ -4,7 +4,7 @@ import subprocess
 import GOGlobal
 import os
 
-DEFAULT_PATH = "C:\\Users\\Matt\\Documents\\Tools\\Symbols"
+DEFAULT_SYMBOL_PATH = "C:\\Users\\Matt\\Documents\\Tools\\Symbols"
 
 class MemoryDumpAnalyzerApp(tk.Tk):
     def __init__(self):
@@ -126,7 +126,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             self.output_text.insert(tk.END, "Please fill all fields.\n")
             return
 
-        command = f'DumpChk [-y {self.get_symbol_path(DEFAULT_PATH)}] {memory_dump_path}'
+        command = f'DumpChk [-y {self.get_symbol_path(DEFAULT_SYMBOL_PATH)}] {memory_dump_path}'
         self.output_text.insert(tk.END, f"Running command: {command}\n")
 
         try:
@@ -134,7 +134,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                 command,
                 shell=True,
                 text=True,
-                cwd="C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Windows Kits\\Debugging Tools for Windows (X64)"
+                cwd="C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64"
             )
             self.output_text.insert(tk.END, output)
         except subprocess.CalledProcessError as e:
