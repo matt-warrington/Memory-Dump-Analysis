@@ -102,16 +102,45 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.analyze_button = tk.Button(self, text="Analyze", command=self.analyze)
         self.analyze_button.grid(column=1, row=3, padx=10, pady=10, sticky='ew')
 
+        '''
+        # Add the ability to make DumpChk commands
+        self.command_frame = tk.Frame(self)
+        self.command_frame.grid(column=1, row=4, padx=10, pady=10, sticky='ew')
+        self.command_label = tk.Label(self.command_frame, text="Enter DumpChk command:")
+        self.command_label.pack(padx=5, pady=10)
+        self.command_var = tk.StringVar()
+        self.command_entry = tk.Entry(self.command_frame, width=30, textvariable=self.command_var)
+        self.command_entry.pack(padx=5, pady=10, fill=tk.X, expand=True)
+        self.command_button = tk.Button(self.command_frame, width=20, text="Enter", command=self.run_command)
+        self.command_button.pack(padx=5, pady=10)
+        '''
+
         # Output Text Box (Scrollable)
         self.output_text = scrolledtext.ScrolledText(self, width=45, height=10)
         self.output_text.grid(column=0, row=4, columnspan=3, rowspan=2, padx=10, pady=10, sticky='nsew')
-
+    
+    '''
+    def run_command(self):
+        # this might not be necessary because DumpChk might not actually be able to do anything else but check the dump initially.
+        command = self.command_entry.get()
+        try:
+            output = subprocess.check_output(
+                command,
+                shell=True,
+                text=True,
+                cwd="C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64"
+            )
+            self.output_text.insert(tk.END, output)
+        except subprocess.CalledProcessError as e:
+            self.output_text.insert(tk.END, f"An error occurred:\n{e.output}\n")
+    '''
+    
     def browse_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Dump Files", "*.DMP"), ("All Files", "*.*")])
         if file_path:
             self.memory_dump_entry.delete(0, tk.END)
             self.memory_dump_entry.insert(0, file_path)
-
+            
     def get_symbol_path(self, base_path = "C:\\Symbols"):
         gg_version = self.go_global_var.get()
         dump_type = self.dump_type_var.get()
