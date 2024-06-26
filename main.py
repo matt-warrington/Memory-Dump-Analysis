@@ -5,7 +5,7 @@ import GOGlobal
 import os
 import myUtils
 
-DEFAULT_SYMBOL_BASE_PATH = "C:\\Users\\Matt\\Documents\\Tools\\Symbols"
+DEFAULT_SYMBOL_BASE_PATH = "C:\\Users\\Matt\\Documents\\Tools\\Symbols" # "C:\\Symbols"  <-- for fileservercolo. 
 
 class MemoryDumpAnalyzerApp(tk.Tk):
     """
@@ -36,11 +36,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.columnconfigure(2, weight=1)
         self.rowconfigure(5, weight=1)
 
-        #self.setDefaultVals()
         self.createWidgets()
-
-    #def setDefaultVals(self):
-    #    self.symbol_path = ""
 
     def createWidgets(self):
         # Memory Dump
@@ -102,24 +98,22 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.analyze_button = tk.Button(self, text="Analyze", command=self.analyze)
         self.analyze_button.grid(column=1, row=3, padx=10, pady=10, sticky='ew')
 
-        '''
-        # Add the ability to make DumpChk commands
-        self.command_frame = tk.Frame(self)
-        self.command_frame.grid(column=1, row=4, padx=10, pady=10, sticky='ew')
-        self.command_label = tk.Label(self.command_frame, text="Enter DumpChk command:")
-        self.command_label.pack(padx=5, pady=10)
-        self.command_var = tk.StringVar()
-        self.command_entry = tk.Entry(self.command_frame, width=30, textvariable=self.command_var)
-        self.command_entry.pack(padx=5, pady=10, fill=tk.X, expand=True)
-        self.command_button = tk.Button(self.command_frame, width=20, text="Enter", command=self.run_command)
-        self.command_button.pack(padx=5, pady=10)
-        '''
-
         # Output Text Box (Scrollable)
         self.output_text = scrolledtext.ScrolledText(self, width=45, height=10)
         self.output_text.grid(column=0, row=4, columnspan=3, rowspan=2, padx=10, pady=10, sticky='nsew')
+
+        # Add the ability to make WinDbg commands - 06/26/24, not sure if this is possible at the moment. 
+        self.command_frame = tk.Frame(self)
+        self.command_frame.grid(column=1, row=6, padx=10, sticky='ew')
+        self.command_label = tk.Label(self.command_frame, text="Enter winDbg command:")
+        self.command_label.pack(padx=5, pady=10)
+        self.command_var = tk.StringVar()
+        self.command_entry = tk.Entry(self.command_frame, width=100, textvariable=self.command_var)
+        self.command_entry.pack(padx=5, pady=10, fill=tk.X, expand=True)
+        self.command_button = tk.Button(self.command_frame, width=20, text="Enter", command=self.run_command)
+        self.command_button.pack(padx=5, pady=10)
     
-    '''
+    
     def run_command(self):
         # this might not be necessary because DumpChk might not actually be able to do anything else but check the dump initially.
         command = self.command_entry.get()
@@ -133,7 +127,6 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             self.output_text.insert(tk.END, output)
         except subprocess.CalledProcessError as e:
             self.output_text.insert(tk.END, f"An error occurred:\n{e.output}\n")
-    '''
     
     def browse_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Dump Files", "*.DMP"), ("All Files", "*.*")])
@@ -141,7 +134,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             self.memory_dump_entry.delete(0, tk.END)
             self.memory_dump_entry.insert(0, file_path)
             
-    def get_symbol_path(self, base_path = "C:\\Symbols"):
+    def get_symbol_path(self):
         gg_version = self.go_global_var.get()
         dump_type = self.dump_type_var.get()
         dump_type_path = "AttestationSigning_DisplayAudioDriver\\DisplayDriver" if dump_type == "Kernel" else ""
@@ -151,7 +144,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
         app_location_path = self.app_location_var.get().lower()
 
-        symbol_path = f"{base_path}\\{gg_version}\\"
+        symbol_path = f"{DEFAULT_SYMBOL_BASE_PATH}\\{gg_version}\\"
         if len(dump_type_path) > 0:
             symbol_path += dump_type_path
         else:
@@ -160,9 +153,9 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         if os.path.exists(symbol_path):
             return symbol_path
         else:
-            return "No symbols found. "
+            print(f"WARNING: No symbols found at {symbol_path}. Copy symbols from \\\\qnapnas.graphon.com\\Builds to C:\\Symbols and try again. ")
+            return "" 
 
-    
     def analyze(self):
         """
         Analyzes the memory dump using the specified parameters and displays the output in the output text box.
@@ -181,21 +174,26 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         if not gg_version or not dump_type or not app_type or not memory_dump_path:
             self.output_text.insert(tk.END, "Please fill all fields.\n")
             return
-       
-        # Think of a way to allow users to set the sy this if they need to
-        symbol_base_path = DEFAULT_SYMBOL_BASE_PATH 
 
-        command = f'DumpChk [-y {self.get_symbol_path(symbol_base_path)}] {memory_dump_path}'
+        command = f'WinDbg -z {memory_dump_path} -y srv*;{self.get_symbol_path()} -c "!analyze -v"'
         self.output_text.insert(tk.END, f"Running command: {command}\n")
 
         try:
-            output = subprocess.check_output(
+            process = subprocess.Popen(
                 command,
                 shell=True,
                 text=True,
-                cwd="C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64"
+                cwd="C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
             )
-            self.output_text.insert(tk.END, output)
+
+            for line in process.stdout:
+                self.output_text.insert(tk.END, line)
+            for line in process.stderr:
+                self.output_text.insert(tk.END, line)
+
+            process.wait()
         except subprocess.CalledProcessError as e:
             self.output_text.insert(tk.END, f"An error occurred:\n{e.output}\n")
 
