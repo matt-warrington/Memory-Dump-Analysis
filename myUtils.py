@@ -35,14 +35,14 @@ def print_nested_dict(dictionary, indent=0):
         else:
             print("  " * indent + f"{key}: {value}")
 
-def select_file(fileType = "Any", fileTypeExt = "*.*", openToDir = "C:\\Test"):
+def select_file(fileType = "Any", fileTypeExt = "*.*", initialDir = "C:\\Test"):
     """
     Opens a file dialog for the user to select a file.
     
     Params:
         str: fileType - what type of file would you like to instruct users to enter?
         str: fileTypeExt - what is the extension of the file type you are looking for? 
-        str: openToDir - the default directory for the dialog to open up to
+        str: initialDir - the default directory for the dialog to open up to
 
     Returns:
         str: The path to the selected file.
@@ -50,12 +50,35 @@ def select_file(fileType = "Any", fileTypeExt = "*.*", openToDir = "C:\\Test"):
     root = tk.Tk()
     root.withdraw()  # Hide the root window
     file_path = filedialog.askopenfilename(
-        initialdir=openToDir,
+        initialdir=initialDir,
         title=f"Select a file of type {fileType}",
         filetypes=[(f"{fileType} Files", fileTypeExt)]
     )
 
+    root.destroy()
+
     return file_path
+
+def select_dir(header="Select a directory", initialDir="C:\\Test"):
+    """
+    Opens a directory dialog for the user to select a directory.
+    
+    Params:
+        str: initialDir - the default directory for the dialog to open up to
+
+    Returns:
+        str: The path to the selected directory.
+    """
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+    dir_path = filedialog.askdirectory(
+        initialdir=initialDir,
+        title=header
+    )
+
+    root.destroy()
+
+    return dir_path
 
 def select_zip_file():
     """

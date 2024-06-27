@@ -1,6 +1,7 @@
 # I think I could replace this with a JSON file one day that could be way more useful for gathering all the relevant info I need. This is just a first attempt at storing some info centrally...
 
 versions = [
+    "6.3.1.33754",
     "6.3.1.33709",
     "6.2.6.33307",
     "6.2.5.32895",
