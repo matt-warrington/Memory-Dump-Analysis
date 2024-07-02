@@ -6,8 +6,11 @@ import GOGlobal
 import os
 import myUtils
 import psutil
+import tempfile
+import zipfile
 
 CONFIG_FILE_PATH = "config.json"
+DEFAULT_WINDBG_PATH = "C:/Program Files (x86)/Windows Kits/10/Debuggers/x86"
 
 class MemoryDumpAnalyzerApp(tk.Tk):
     """
@@ -29,6 +32,11 @@ class MemoryDumpAnalyzerApp(tk.Tk):
     def __init__(self):
         super().__init__()
 
+        # Have the user set base paths based on their machine. They can set these once the first time they run the program, and change it from config.json after that. 
+        self.symbol_base_path = self.get_symbol_base_path()
+        self.dump_base_path = self.get_dump_base_path()
+        self.winDbg_path = self.get_winDbg_path()
+
         self.title("Memory Dump Analyzer")
 
         # Configure grid layout to expand
@@ -36,11 +44,6 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.columnconfigure(1, weight=1)
         self.columnconfigure(2, weight=1)
         self.rowconfigure(5, weight=1)
-
-        # Have the user set base paths based on their machine. They can set these once the first time they run the program, and change it from config.json after that. 
-        self.symbol_base_path = self.get_symbol_base_path()
-        self.dump_base_path = self.get_dump_base_path()
-        self.winDbg_path = self.get_winDbg_path()
 
         self.createWidgets()
 
@@ -112,6 +115,56 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
         self.update_visibility()
 
+    def get_winDbg_path(self):
+        def check_windbg_path(path):
+            return os.path.exists(os.path.join(path, "windbg.exe"))
+
+        default_windbg_path = "C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64"
+
+        if check_windbg_path(default_windbg_path):
+            if not os.path.exists(CONFIG_FILE_PATH):
+                config = {"windbg_path": default_windbg_path}
+                with open(CONFIG_FILE_PATH, 'w') as config_file:
+                    json.dump(config, config_file)
+            else:
+                # Read the WinDbg path from the config file
+                with open(CONFIG_FILE_PATH, 'r') as config_file:
+                    config = json.load(config_file)
+
+                config["windbg_path"] = default_windbg_path
+                with open(CONFIG_FILE_PATH, 'w') as config_file:
+                    json.dump(config, config_file)
+
+            return default_windbg_path
+
+        if not os.path.exists(CONFIG_FILE_PATH):
+            # First run, set the default WinDbg path
+            new_base_path = myUtils.select_dir("Select the path for WinDbg...")
+            if not check_windbg_path(new_base_path):
+                messagebox.showerror("WinDbg Not Found", "WinDbg.exe could not be found at the specified location. Please ensure WinDbg is installed and include the correct path in the config file.")
+                return ""
+            config = {"windbg_path": new_base_path}
+            with open(CONFIG_FILE_PATH, 'w') as config_file:
+                json.dump(config, config_file)
+            return new_base_path
+        else:
+            # Read the WinDbg path from the config file
+            with open(CONFIG_FILE_PATH, 'r') as config_file:
+                config = json.load(config_file)
+
+            base_path = config.get("windbg_path", "")
+            if base_path == "" or not check_windbg_path(base_path):
+                new_base_path = myUtils.select_dir("Select the path for WinDbg...")
+                if not check_windbg_path(new_base_path):
+                    messagebox.showerror("WinDbg Not Found", "WinDbg.exe could not be found at the specified location. Please ensure WinDbg is installed and include the correct path in the config file.")
+                    return ""
+                config["windbg_path"] = new_base_path
+                with open(CONFIG_FILE_PATH, 'w') as config_file:
+                    json.dump(config, config_file)
+                return new_base_path
+
+            return base_path
+    
     def update_visibility(self):
         if self.dump_type_var.get() == "Kernel":
             self.app_type_label.grid_remove()
@@ -139,28 +192,6 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         if file_path:
             self.memory_dump_entry.delete(0, tk.END)
             self.memory_dump_entry.insert(0, file_path)
-
-    def get_winDbg_path(self):
-        if not os.path.exists(CONFIG_FILE_PATH):
-            # First run, set the default WinDbg path
-            new_base_path = myUtils.select_dir("Select the path for WinDbg...")
-            config = {"windbg_path": new_base_path}
-            with open(CONFIG_FILE_PATH, 'w') as config_file:
-                json.dump(config, config_file)
-            return new_base_path
-        else:
-            # Read the WinDbg path from the config file
-            with open(CONFIG_FILE_PATH, 'r') as config_file:
-                config = json.load(config_file)
-
-            base_path = config.get("windbg_path", "")
-            if base_path == "" or not os.path.exists(base_path):
-                base_path = myUtils.select_dir("Select the path for WinDbg...")
-                config["windbg_path"] = base_path
-                with open(CONFIG_FILE_PATH, 'w') as config_file:
-                    json.dump(config, config_file)
-            
-            return base_path
 
     def get_symbol_base_path(self):
         if not os.path.exists(CONFIG_FILE_PATH):
@@ -206,6 +237,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             
             return base_path
 
+
     def get_symbol_path(self):
         gg_version = self.go_global_var.get()
         dump_type = self.dump_type_var.get()
@@ -222,6 +254,13 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         else:
             symbol_path += f"{app_type_path}/Release/{app_location_path}"
 
+        # Check if the path is a .zip file and unzip it if necessary
+        if symbol_path.endswith('.zip') and os.path.isfile(symbol_path):
+            with zipfile.ZipFile(symbol_path, 'r') as zip_ref:
+                temp_dir = tempfile.mkdtemp()
+                zip_ref.extractall(temp_dir)
+                symbol_path = temp_dir
+
         if not os.path.exists(symbol_path):
             messagebox.showwarning("Path Not Found", f"No symbols found at {symbol_path}. \n\nPlease find the symbols you are looking for and upload the path here.")
             new_symbol_path = filedialog.askdirectory(title="Select Path of Symbols")
@@ -232,7 +271,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                 return ""
             
         return symbol_path
-
+    
     def launch_winDbg(self):
         """
         Opens the memory dump in WinDbg using the specified parameters.
@@ -243,12 +282,13 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         Returns:
             None
         """
-        gg_version = self.go_global_var.get()
-        dump_type = self.dump_type_var.get()
-        app_type = self.app_type_var.get()
+        #gg_version = self.go_global_var.get()
+        #dump_type = self.dump_type_var.get()
+        #app_type = self.app_type_var.get()
         memory_dump_path = self.memory_dump_entry.get()
 
-        if not gg_version or not dump_type or not app_type or not memory_dump_path:
+        # All other fields are implemented 
+        if not memory_dump_path or not self.go_global_var.get():
             messagebox.showwarning("Input Error", "Please fill all fields.")
             return
 
