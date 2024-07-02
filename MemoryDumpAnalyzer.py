@@ -60,7 +60,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.case_number_label.grid(column=0, row=0, padx=10, pady=5, sticky='w')
         self.case_number_entry = tk.Entry(self, width=50)
         self.case_number_entry.grid(column=1, row=0, padx=10, pady=5, sticky='w')
-        self.find_dump_button = tk.Button(self, text="Find Dump", command=self.find_dmp_file)
+        self.find_dump_button = tk.Button(self, text="Find Dump", command=self.find_dmp_files)
         self.find_dump_button.grid(column=2, row=0, padx=10, pady=5, sticky='w')
         
         # Memory Dump
@@ -174,108 +174,66 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
             return base_path
     
-    def find_dmp_file(self):
-            case_number = self.case_number_entry.get()
-            primary_path = os.path.join(self.dump_base_path, case_number)
-            secondary_path = os.path.join(self.shared_folder_path, case_number)
+    def find_dmp_files(self):
+        case_number = self.case_number_entry.get()
+        if not case_number or case_number == "":
+            case_selected = myUtils.select_dir(initialDir=self.dump_base_path)
+            case_number = os.path.basename(case_selected)
 
-            # Helper function to search for .dmp files recursively
-            def search_for_dmp_files(base_path):
-                dmp_files = []
-                for root, dirs, files in os.walk(base_path):
+        primary_path = os.path.join(self.dump_base_path, case_number)
+        secondary_path = os.path.join(self.shared_folder_path, case_number)
+
+        self.dmp_files = []  # Clear any previously found files
+
+        # Helper function to search for .dmp files recursively
+        def search_for_dmp_files(base_path):
+            dmp_files = []
+            for root, dirs, files in os.walk(base_path):
+                # Only search directories with "dump" or "dmp" in the name
+                dirs[:] = [d for d in dirs if 'dump' in d.lower() or 'dmp' in d.lower()]
+                for file in files:
+                    if file.lower().endswith('.dmp'):
+                        dmp_files.append(os.path.join(root, file))
+            return dmp_files
+
+        # Helper function to unzip files
+        def unzip_files(zip_path, extract_to):
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                print(zip_path)
+                zip_ref.extractall(extract_to)
+
+        def process_directory(path):
+            dmp_files = search_for_dmp_files(path)
+            # If no .dmp files found, look for zip files to extract
+            if not dmp_files:
+                for root, dirs, files in os.walk(path):
                     for file in files:
-                        file_lower = file.lower()
-                        
-                        if file_lower.endswith('.dmp'):
-                            dmp_files.append(os.path.join(root, file))
-                        elif file_lower.endswith('.zip'):
+                        if file.lower().endswith('.zip'):
+                            zip_path = os.path.join(root, file)
                             extract_to = os.path.join(root, os.path.splitext(file)[0])
-                            
-                            # If the dump has already been extracted don't do it again.
-                            if not os.path.exists(extract_to):
-                                zip_path = os.path.join(root, file)
-                                
-                                unzip_files(zip_path, extract_to)
-                                dmp_files.extend(search_for_dmp_files(extract_to))
+                            unzip_files(zip_path, extract_to)
+                            dmp_files.extend(search_for_dmp_files(extract_to))
+            return dmp_files
 
-                    for d in dirs:
-                        if "dump" in d or "dmp" in d:
-                            dmp_files.extend(search_for_dmp_files(d))
-                    
-                
-                return dmp_files
+        # Check primary location
+        if os.path.isdir(primary_path):
+            dmp_files = process_directory(primary_path)
+        elif os.path.isdir(secondary_path):
+            temp_dir = os.path.join(self.dump_base_path, case_number)
+            shutil.copytree(secondary_path, temp_dir)
+            dmp_files = process_directory(temp_dir)
+        else:
+            messagebox.showerror("Error", f"No directory found for case {case_number} in either location.\n\n{primary_path}\n{secondary_path}")
 
-            def unzip_files(zip_path, extract_to):
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_to)
-
-            def process_directory(path):
-                dmp_files = search_for_dmp_files(path)
-                # If no .dmp files found, look for zip files to extract
-                '''
-                if not dmp_files:
-                    for root, dirs, files in os.walk(path):
-                        for file in files:
-                            if file.lower().endswith('.zip'):
-                                extract_to = os.path.join(root, os.path.splitext(file)[0])
-                                
-                                # If the dump has already been extracted don't do it again.
-                                if not os.path.exists(extract_to):
-                                    zip_path = os.path.join(root, file)
-                                    
-                                    unzip_files(zip_path, extract_to)
-                                    dmp_files.extend(search_for_dmp_files(extract_to))
-                '''
-                return dmp_files
-
-            # Check primary location
-            if os.path.isdir(primary_path):
-                dmp_files = process_directory(primary_path)
-                if dmp_files:
-                    if len(dmp_files) == 1:
-                        selected_file = dmp_files[0]
-                    else:
-                        selected_file = filedialog.askopenfilename(
-                            title="Select a dump file",
-                            initialdir=primary_path,
-                            filetypes=(("Dump files", "*.dmp"), ("All files", "*.*")),
-                            multiple=False
-                        )
-                        if not selected_file:
-                            messagebox.showinfo("No Selection", f"No dump file selected. Defaulting to the first one in {primary_path}.")
-                            selected_file = dmp_files[0]
-
-                    self.memory_dump_entry.delete(0, tk.END)
-                    self.memory_dump_entry.insert(0, selected_file)
-                    return
-            elif os.path.isdir(secondary_path):
-                new_path = os.path.join(self.dump_base_path, case_number)
-                shutil.copytree(secondary_path, new_path)
-
-                dmp_files = process_directory(primary_path)            
-                
-                if dmp_files:
-                    if len(dmp_files) == 1:
-                        selected_file = dmp_files[0]
-                    else:
-                        selected_file = filedialog.askopenfilename(
-                            title="Select a dump file",
-                            initialdir=primary_path,
-                            filetypes=(("Dump files", "*.dmp"), ("All files", "*.*")),
-                            multiple=False
-                        )
-                        if not selected_file:
-                            messagebox.showinfo("No Selection", f"No dump file selected. Defaulting to the first one in {primary_path}.")
-                            selected_file = dmp_files[0]
-
-                    self.memory_dump_entry.delete(0, tk.END)
-                    self.memory_dump_entry.insert(0, selected_file)
-                    return
-            else:
-                messagebox.showerror("Error", f"No directory found for case {case_number} in either location.\n{primary_path}\n{secondary_path}")
-
-            messagebox.showerror("Error", f"No memory dump found for case {case_number} in either location.\n{primary_path}\n{secondary_path}")
-
+        if dmp_files:
+            self.dmp_files = dmp_files
+            
+            self.memory_dump_entry.delete(0, tk.END)
+            self.memory_dump_entry.insert(0, ', '.join(self.dmp_files))
+            return
+        else:
+            messagebox.showerror("Error", f"No dump files found for case {case_number} in either location.\n\n{primary_path}\n{secondary_path}")
+    
     def update_visibility(self):
         if self.dump_type_var.get() == "Kernel":
             self.app_type_label.grid_remove()
@@ -378,6 +336,9 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
     def get_symbol_path(self):
         gg_version = self.go_global_var.get()
+        if not gg_version or gg_version == "":
+            return ""
+
         dump_type = self.dump_type_var.get()
         dump_type_path = "AttestationSigning_DisplayAudioDriver/DisplayDriver" if dump_type == "Kernel" else ""
 
@@ -420,36 +381,34 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         Returns:
             None
         """
-        #gg_version = self.go_global_var.get()
-        #dump_type = self.dump_type_var.get()
-        #app_type = self.app_type_var.get()
-        memory_dump_path = self.memory_dump_entry.get()
-
-        # All other fields are implemented 
-        if not memory_dump_path or not self.go_global_var.get():
-            messagebox.showwarning("Input Error", "Please fill all fields.")
+        if not self.dmp_files:
+            messagebox.showwarning("Input Error", "No dumps selected.")
             return
 
-        # Check for running instances of WinDbg
         winDbg_count = sum(1 for proc in psutil.process_iter(['name']) if proc.info['name'] == 'windbg.exe')
-        max_instances = 10  # Set your threshold here
+        max_instances = 5
 
-        if winDbg_count >= max_instances:
-            messagebox.showwarning("Instance Limit Reached", f"Too many instances of WinDbg are running ({winDbg_count}). Please close some instances before launching a new one.")
-            return
+        if winDbg_count + len(self.dmp_files) > max_instances:
+            messagebox.showwarning("Instance Limit Reached", f"Launching these dumps will exceed the instance limit ({max_instances}). \n\n You may want to close other instances of WinDbg before proceeding. \nIf not, instances will launch until they reach the limit.")
 
-        command = f'WinDbg -z {memory_dump_path} -y srv*;{self.get_symbol_path()} -c "!analyze -v"'
-        try:
-            process = subprocess.Popen(
-                command,
-                shell=True,
-                text=False,
-                cwd=self.winDbg_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-        except subprocess.CalledProcessError as e:
-            messagebox.showerror("Execution Error", f"An error occurred:\n{e.output}")
+        for memory_dump_path in self.dmp_files:
+            command = f'WinDbg -z {memory_dump_path} -y srv*;{self.get_symbol_path()} -c "!analyze -v"'
+            try:
+                winDbg_count = sum(1 for proc in psutil.process_iter(['name']) if proc.info['name'] == 'windbg.exe')
+                if winDbg_count < max_instances:
+                    subprocess.Popen(
+                        command,
+                        shell=True,
+                        text=False,
+                        cwd=self.winDbg_path,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                else:
+                    messagebox.showwarning("Instance Limit Reached", f"Launching these dumps will exceed the instance limit ({max_instances}). Please close some instances before launching new ones.")
+
+            except subprocess.CalledProcessError as e:
+                messagebox.showerror("Execution Error", f"An error occurred:\n{e.output}")
 
 if __name__ == "__main__":
     app = MemoryDumpAnalyzerApp()
