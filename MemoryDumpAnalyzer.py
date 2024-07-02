@@ -1,4 +1,5 @@
 import json
+import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import subprocess
@@ -36,6 +37,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.symbol_base_path = self.get_symbol_base_path()
         self.dump_base_path = self.get_dump_base_path()
         self.winDbg_path = self.get_winDbg_path()
+        self.shared_folder_path = self.get_backup_dump_path()
 
         self.title("Memory Dump Analyzer")
 
@@ -54,28 +56,35 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.destroy()
 
     def createWidgets(self):
+        self.case_number_label = tk.Label(self, text="Case Number")
+        self.case_number_label.grid(column=0, row=0, padx=10, pady=5, sticky='w')
+        self.case_number_entry = tk.Entry(self, width=50)
+        self.case_number_entry.grid(column=1, row=0, padx=10, pady=5, sticky='w')
+        self.find_dump_button = tk.Button(self, text="Find Dump", command=self.find_dmp_file)
+        self.find_dump_button.grid(column=2, row=0, padx=10, pady=5, sticky='w')
+        
         # Memory Dump
         self.memory_dump_label = tk.Label(self, text="Memory Dump")
-        self.memory_dump_label.grid(column=0, row=0, padx=10, pady=5, sticky='w')
+        self.memory_dump_label.grid(column=0, row=1, padx=10, pady=5, sticky='w')
 
         self.memory_dump_entry = tk.Entry(self, width=30)
-        self.memory_dump_entry.grid(column=1, row=0, padx=10, pady=5, sticky='ew')
+        self.memory_dump_entry.grid(column=1, row=1, padx=10, pady=5, sticky='ew')
 
         self.browse_button = tk.Button(self, text="Browse...", command=self.browse_file)
-        self.browse_button.grid(column=2, row=0, padx=10, pady=5, sticky='ew')
+        self.browse_button.grid(column=2, row=1, padx=10, pady=5, sticky='ew')
         
         # GO-Global Version
         self.go_global_label = tk.Label(self, text="GO-Global Version")
-        self.go_global_label.grid(column=0, row=1, padx=10, pady=5, sticky='w')
+        self.go_global_label.grid(column=0, row=2, padx=10, pady=5, sticky='w')
         
         self.go_global_var = tk.StringVar()
         self.go_global_combobox = ttk.Combobox(self, textvariable=self.go_global_var)
         self.go_global_combobox['values'] = self.get_go_global_versions()
-        self.go_global_combobox.grid(column=1, row=1, padx=10, pady=5, sticky='ew')
+        self.go_global_combobox.grid(column=1, row=2, padx=10, pady=5, sticky='ew')
 
         # Dump Type
         self.radio_buttons_frame = tk.Frame(self)
-        self.radio_buttons_frame.grid(column=0, row=2, columnspan=3, padx=5, pady=10)
+        self.radio_buttons_frame.grid(column=0, row=3, columnspan=3, padx=5, pady=10)
 
         self.dump_type_label = tk.Label(self.radio_buttons_frame, text="Dump Type:")
         self.dump_type_label.grid(column=0, row=0, padx=10, pady=5, sticky='w')
@@ -111,7 +120,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
         # Launch WinDbg Button
         self.launch_winDbg_button = tk.Button(self, text="Launch WinDbg", command=self.launch_winDbg)
-        self.launch_winDbg_button.grid(column=1, row=3, padx=10, pady=10, sticky='ew')
+        self.launch_winDbg_button.grid(column=1, row=4, padx=10, pady=10, sticky='ew')
 
         self.update_visibility()
 
@@ -165,6 +174,108 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
             return base_path
     
+    def find_dmp_file(self):
+            case_number = self.case_number_entry.get()
+            primary_path = os.path.join(self.dump_base_path, case_number)
+            secondary_path = os.path.join(self.shared_folder_path, case_number)
+
+            # Helper function to search for .dmp files recursively
+            def search_for_dmp_files(base_path):
+                dmp_files = []
+                for root, dirs, files in os.walk(base_path):
+                    for file in files:
+                        file_lower = file.lower()
+                        
+                        if file_lower.endswith('.dmp'):
+                            dmp_files.append(os.path.join(root, file))
+                        elif file_lower.endswith('.zip'):
+                            extract_to = os.path.join(root, os.path.splitext(file)[0])
+                            
+                            # If the dump has already been extracted don't do it again.
+                            if not os.path.exists(extract_to):
+                                zip_path = os.path.join(root, file)
+                                
+                                unzip_files(zip_path, extract_to)
+                                dmp_files.extend(search_for_dmp_files(extract_to))
+
+                    for d in dirs:
+                        if "dump" in d or "dmp" in d:
+                            dmp_files.extend(search_for_dmp_files(d))
+                    
+                
+                return dmp_files
+
+            def unzip_files(zip_path, extract_to):
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_to)
+
+            def process_directory(path):
+                dmp_files = search_for_dmp_files(path)
+                # If no .dmp files found, look for zip files to extract
+                '''
+                if not dmp_files:
+                    for root, dirs, files in os.walk(path):
+                        for file in files:
+                            if file.lower().endswith('.zip'):
+                                extract_to = os.path.join(root, os.path.splitext(file)[0])
+                                
+                                # If the dump has already been extracted don't do it again.
+                                if not os.path.exists(extract_to):
+                                    zip_path = os.path.join(root, file)
+                                    
+                                    unzip_files(zip_path, extract_to)
+                                    dmp_files.extend(search_for_dmp_files(extract_to))
+                '''
+                return dmp_files
+
+            # Check primary location
+            if os.path.isdir(primary_path):
+                dmp_files = process_directory(primary_path)
+                if dmp_files:
+                    if len(dmp_files) == 1:
+                        selected_file = dmp_files[0]
+                    else:
+                        selected_file = filedialog.askopenfilename(
+                            title="Select a dump file",
+                            initialdir=primary_path,
+                            filetypes=(("Dump files", "*.dmp"), ("All files", "*.*")),
+                            multiple=False
+                        )
+                        if not selected_file:
+                            messagebox.showinfo("No Selection", f"No dump file selected. Defaulting to the first one in {primary_path}.")
+                            selected_file = dmp_files[0]
+
+                    self.memory_dump_entry.delete(0, tk.END)
+                    self.memory_dump_entry.insert(0, selected_file)
+                    return
+            elif os.path.isdir(secondary_path):
+                new_path = os.path.join(self.dump_base_path, case_number)
+                shutil.copytree(secondary_path, new_path)
+
+                dmp_files = process_directory(primary_path)            
+                
+                if dmp_files:
+                    if len(dmp_files) == 1:
+                        selected_file = dmp_files[0]
+                    else:
+                        selected_file = filedialog.askopenfilename(
+                            title="Select a dump file",
+                            initialdir=primary_path,
+                            filetypes=(("Dump files", "*.dmp"), ("All files", "*.*")),
+                            multiple=False
+                        )
+                        if not selected_file:
+                            messagebox.showinfo("No Selection", f"No dump file selected. Defaulting to the first one in {primary_path}.")
+                            selected_file = dmp_files[0]
+
+                    self.memory_dump_entry.delete(0, tk.END)
+                    self.memory_dump_entry.insert(0, selected_file)
+                    return
+            else:
+                messagebox.showerror("Error", f"No directory found for case {case_number} in either location.\n{primary_path}\n{secondary_path}")
+
+            messagebox.showerror("Error", f"No memory dump found for case {case_number} in either location.\n{primary_path}\n{secondary_path}")
+
     def update_visibility(self):
         if self.dump_type_var.get() == "Kernel":
             self.app_type_label.grid_remove()
@@ -193,6 +304,33 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             self.memory_dump_entry.delete(0, tk.END)
             self.memory_dump_entry.insert(0, file_path)
 
+    def get_backup_dump_path(self):
+        default_backup_path = "//supportnas.graphon.com/support/Cases"
+        
+        if not os.path.exists(CONFIG_FILE_PATH):
+            # First run, set the default symbol path
+            if os.path.exists(default_backup_path):
+                new_path = default_backup_path
+            else:
+                new_path = myUtils.select_dir("Select a secondary path for finding dumps...")
+
+            config = {"backup_dump_path": new_path}
+            with open(CONFIG_FILE_PATH, 'w') as config_file:
+                json.dump(config, config_file)
+            return new_path
+        else:
+            # Read the symbol path from the config file
+            with open(CONFIG_FILE_PATH, 'r') as config_file:
+                config = json.load(config_file)
+
+            dump_path = config.get("backup_dump_path", "")
+            if dump_path == "" or not os.path.exists(dump_path):
+                dump_path = myUtils.select_dir("Select a secondary path for finding dumps...")
+                config["backup_dump_path"] = dump_path
+                with open(CONFIG_FILE_PATH, 'w') as config_file:
+                    json.dump(config, config_file)
+            
+            return dump_path
     def get_symbol_base_path(self):
         if not os.path.exists(CONFIG_FILE_PATH):
             # First run, set the default symbol path
@@ -294,7 +432,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
         # Check for running instances of WinDbg
         winDbg_count = sum(1 for proc in psutil.process_iter(['name']) if proc.info['name'] == 'windbg.exe')
-        max_instances = 5  # Set your threshold here
+        max_instances = 10  # Set your threshold here
 
         if winDbg_count >= max_instances:
             messagebox.showwarning("Instance Limit Reached", f"Too many instances of WinDbg are running ({winDbg_count}). Please close some instances before launching a new one.")
