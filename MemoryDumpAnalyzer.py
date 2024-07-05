@@ -88,6 +88,17 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.launch_winDbg_button = tk.Button(self, text="Launch WinDbg", command=self.launch_winDbg)
         self.launch_winDbg_button.grid(column=1, row=4, padx=10, pady=10, sticky='ew')
 
+        # Clear Table button
+        self.clear_button = tk.Button(self, text="Clear Table", command=self.clear_table)
+        self.clear_button.grid(column=2, row=4, padx=10, pady=10, sticky='ew')
+
+    def clear_table(self):
+        # Clear the table
+        for item in self.table.get_children():
+            self.table.delete(item)
+        # Reset the dmp_files list
+        self.dmp_files = []
+
     def get_winDbg_path(self):
         def check_windbg_path(path):
             return os.path.exists(os.path.join(path, "windbg.exe"))
@@ -154,11 +165,24 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         def search_for_dmp_files(base_path):
             dmp_files = []
             for root, dirs, files in os.walk(base_path):
-                # Only search directories with "dump" or "dmp" in the name
-                dirs[:] = [d for d in dirs if 'dump' in d.lower() or 'dmp' in d.lower()]
                 for file in files:
-                    if file.lower().endswith('.dmp'):
+                    file_lower = file.lower()
+                    
+                    if file_lower.endswith('.dmp'):
                         dmp_files.append(os.path.join(root, file))
+                    elif file_lower.endswith('.zip'):
+                        if not os.path.splitext(file)[0] in dirs:
+                            zip_path = os.path.join(root, file)
+                            extract_to = os.path.join(root, os.path.splitext(file)[0])
+                            unzip_files(zip_path, extract_to)
+                            # Search for .dmp files in the extracted folder
+                            extracted_dmp_files = search_for_dmp_files(extract_to)
+                            if extracted_dmp_files:
+                                dmp_files.extend(extracted_dmp_files)
+
+                for d in dirs:
+                    if "dump" in d or "dmp" in d:
+                        dmp_files.extend(search_for_dmp_files(d))
             return dmp_files
 
         # Helper function to unzip files
@@ -181,9 +205,9 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                                     data = bz2.decompress(zip_ref.read(file_info.filename))
                                 elif file_info.compress_type == zipfile.ZIP_LZMA:
                                     data = lzma.decompress(zip_ref.read(file_info.filename))
-                                elif file_info.compress_type == 9:  # Custom handling for compression type 9
+                                #elif file_info.compress_type == 9:  # Custom handling for compression type 9
                                     # Attempt extraction using 7z for unsupported compression methods
-                                    subprocess.run(['7z', 'x', '-o' + extract_to, zip_path], check=True)
+                                    #subprocess.run(['7z', 'x', '-o' + extract_to, zip_path], check=True)
                                 else:
                                     raise NotImplementedError(f"Unsupported compression method: {file_info.compress_type}")
                                 
@@ -197,7 +221,12 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                                 messagebox.showwarning("Extraction Warning", 
                                                     f"Could not extract file '{file_info.filename}' from '{os.path.basename(zip_path)}'.\n"
                                                     "The file may be corrupted or use an unsupported compression method.\n"
-                                                    f"Compression type: {file_info.compress_type}")
+                                                    f"Compression type: {file_info.compress_type}\n"
+                                                    "Manually unzip the file and then select the dump file.")
+                                extract_to = myUtils.select_file("DMP. ", initialDir=os.path.dirname(zip_path), fileTypeExt="*.*")
+                                
+                                # Copy contents of the unzipped directory to the new dir
+
                 
                 #print(f"Extraction of {zip_path} completed.")
             except zipfile.BadZipFile:
@@ -207,37 +236,19 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             except Exception as e:
                 file_name = os.path.basename(zip_path)
                 messagebox.showerror("Error", f"An error occurred while extracting '{file_name}': {str(e)}")
-        
-        def process_directory(path):
-            dmp_files = search_for_dmp_files(path)
-            # If no .dmp files found, look for zip files to extract
-            if not dmp_files:
-                for root, dirs, files in os.walk(path):
-                    for file in files:
-                        if file.lower().endswith('.zip'):
-                            zip_path = os.path.join(root, file)
-                            extract_to = os.path.join(root, os.path.splitext(file)[0])
-                            unzip_files(zip_path, extract_to)
-                            # Search for .dmp files in the extracted folder
-                            extracted_dmp_files = search_for_dmp_files(extract_to)
-                            if extracted_dmp_files:
-                                dmp_files.extend(extracted_dmp_files)
-            return dmp_files
 
         # Check primary location
         if os.path.isdir(primary_path):
-            dmp_files = process_directory(primary_path)
+            dmp_files = search_for_dmp_files(primary_path)
         elif os.path.isdir(secondary_path):
             temp_dir = os.path.join(self.dump_base_path, case_number)
             shutil.copytree(secondary_path, temp_dir)
-            dmp_files = process_directory(temp_dir)
+            dmp_files = search_for_dmp_files(temp_dir)
         else:
             messagebox.showerror("Error", f"No directory found for case {case_number} in either location.\n\n{primary_path}\n{secondary_path}")
 
         if dmp_files:
-            self.dmp_files = dmp_files
-            self.memory_dump_entry.delete(0, tk.END)
-            self.memory_dump_entry.insert(0, ', '.join(self.dmp_files))
+            self.dmp_files.extend(dmp_files)
             self.populate_table()
             return
         else:
