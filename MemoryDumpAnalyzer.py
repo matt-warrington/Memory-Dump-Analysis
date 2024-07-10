@@ -45,9 +45,15 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.destroy()
 
     def protect_path(func):
+        '''
+        The point of this is to prevent certain functions (e.g. unzip_files()) from running on network folders.
+        I don't think there is any possibility of this at the current stage of the project anyway, but worth checking to be safe.
+        '''
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            if any(".graphon.com" in arg for arg in args if isinstance(arg, str)):
+            # Would the check for "//" be enough to ensure we can't run an operation on a network path? 
+            # The check for ".graphon.com" might be overkill but I thought better safe than sorry.
+            if any(".graphon.com" in arg for arg in args if isinstance(arg, str)) or any("//" in arg for arg in args if isinstance(arg, str)):
                 raise PermissionError(f"Operation not allowed on protected path: {self.shared_folder_path}")
             return func(self, *args, **kwargs)
         return wrapper
@@ -56,9 +62,9 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.case_number_label = tk.Label(self, text="Case Number: ")
         self.case_number_label.grid(column=0, row=0, padx=10, pady=5, sticky='w')
         self.case_number_entry = tk.Entry(self, width=50)
-        self.case_number_entry.grid(column=1, row=0, padx=10, pady=5, sticky='w')
-        self.find_dump_button = tk.Button(self, text="Find Dump", command=self.find_dmp_files)
-        self.find_dump_button.grid(column=2, row=0, padx=10, pady=5, sticky='w')
+        self.case_number_entry.grid(column=1, row=0, padx=10, pady=5, sticky='ew')
+        self.find_dump_button = tk.Button(self, text="Get Dump(s)", command=self.find_dmp_files)
+        self.find_dump_button.grid(column=2, row=0, padx=10, pady=5, sticky='ew')
         
         # Memory Dump
         self.memory_dump_label = tk.Label(self, text="Add individual memory dump: ")
@@ -182,9 +188,12 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             case_selected = myUtils.select_dir(initialDir=self.dump_base_path)
             case_number = os.path.basename(case_selected)
 
-        if case_number == "":
+        # If the select_dir() is cancelled, don't fill out the table
+        if case_selected == "":
             self.dmp_files = []
             return
+        elif os.path.dirname(case_selected) != self.dump_base_path:
+            shutil.copytree(case_selected, os.path.join(self.dump_base_path, case_number), dirs_exist_ok=True) 
 
         primary_path = os.path.join(self.dump_base_path, case_number)
         secondary_path = os.path.join(self.shared_folder_path, case_number)
@@ -459,12 +468,9 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             self.memory_dump_entry.insert(0, file_path)
             
             self.dmp_files.append(file_path)
-            # Add the selected file to the table
-            item_id = self.table.insert('', 'end', values=(os.path.basename(file_path), 'User', '64-bit', 'Client'))
-            self.setup_item_dropdowns(item_id)
             
-            # Show the table if it's hidden
-            self.table_frame.grid()
+            # Add the selected file to the table
+            self.populate_table()
 
     def get_backup_dump_path(self):
         default_backup_path = "//supportnas.graphon.com/support/Cases"
