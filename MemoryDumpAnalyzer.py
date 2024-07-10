@@ -1,3 +1,4 @@
+from functools import wraps
 import json
 import shutil
 import tkinter as tk
@@ -15,6 +16,7 @@ import lzma
 
 CONFIG_FILE_PATH = "config.json"
 DEFAULT_WINDBG_PATH = "C:/Program Files (x86)/Windows Kits/10/Debuggers/x86"
+MAX_WINDBG_INSTANCES = 10
 
 class MemoryDumpAnalyzerApp(tk.Tk):
     def __init__(self):
@@ -41,6 +43,14 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
     def on_closing(self):
         self.destroy()
+
+    def protect_path(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if any(".graphon.com" in arg for arg in args if isinstance(arg, str)):
+                raise PermissionError(f"Operation not allowed on protected path: {self.shared_folder_path}")
+            return func(self, *args, **kwargs)
+        return wrapper
 
     def createWidgets(self):
         self.case_number_label = tk.Label(self, text="Case Number: ")
@@ -81,12 +91,18 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.table.heading('App Location', text='App Location')
         self.table.pack(expand=True, fill='both')
         self.table.bind('<Double-1>', self.on_cell_double_click)
-        # Hide the table initially
-        self.table_frame.grid_remove()
+        self.table.bind('<<TreeviewSelect>>', self.on_table_select)
+        self.table_frame.grid_remove() # Hide the table initially
+
+        # Individual launch button
+        self.launch_winDbg_indy_button = tk.Button(self, text="Launch Dump", command=self.launch_winDbg_indy)
+        self.launch_winDbg_indy_button.grid(column=0, row=4, padx=10, pady=10, sticky='ew')
+        self.launch_winDbg_indy_button.config(state=tk.DISABLED)
 
         # Launch WinDbg Button
-        self.launch_winDbg_button = tk.Button(self, text="Launch WinDbg", command=self.launch_winDbg)
+        self.launch_winDbg_button = tk.Button(self, text="Launch All Dumps", command=self.launch_winDbg)
         self.launch_winDbg_button.grid(column=1, row=4, padx=10, pady=10, sticky='ew')
+        self.launch_winDbg_button.config(state=tk.DISABLED)
 
         # Clear Table button
         self.clear_button = tk.Button(self, text="Clear Table", command=self.clear_table)
@@ -98,6 +114,13 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             self.table.delete(item)
         # Reset the dmp_files list
         self.dmp_files = []
+
+    def on_table_select(self, event):
+        selected_items = self.table.selection()
+        if selected_items:
+            self.launch_winDbg_indy_button.config(state=tk.NORMAL)
+        else:
+            self.launch_winDbg_indy_button.config(state=tk.DISABLED)
 
     def get_winDbg_path(self):
         def check_windbg_path(path):
@@ -150,11 +173,18 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             return base_path
     
 
+    @protect_path
     def find_dmp_files(self):
+        # User selects a directory
+        case_selected = ""
         case_number = self.case_number_entry.get()
-        if not case_number or case_number == "":
+        if case_number == "":
             case_selected = myUtils.select_dir(initialDir=self.dump_base_path)
             case_number = os.path.basename(case_selected)
+
+        if case_number == "":
+            self.dmp_files = []
+            return
 
         primary_path = os.path.join(self.dump_base_path, case_number)
         secondary_path = os.path.join(self.shared_folder_path, case_number)
@@ -174,7 +204,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                         if not os.path.splitext(file)[0] in dirs:
                             zip_path = os.path.join(root, file)
                             extract_to = os.path.join(root, os.path.splitext(file)[0])
-                            unzip_files(zip_path, extract_to)
+                            self.unzip_files(zip_path, extract_to)
                             # Search for .dmp files in the extracted folder
                             extracted_dmp_files = search_for_dmp_files(extract_to)
                             if extracted_dmp_files:
@@ -185,76 +215,78 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                         dmp_files.extend(search_for_dmp_files(d))
             return dmp_files
 
-        # Helper function to unzip files
-        def unzip_files(zip_path, extract_to):
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    for file_info in zip_ref.infolist():
-                        try:
-                            # First, try to extract using zipfile's built-in extract method
-                            zip_ref.extract(file_info, extract_to)
-                        except:# zipfile.error:
-                            # If that fails, try manual decompression
-                            try:
-                                data = None
-                                if file_info.compress_type == zipfile.ZIP_STORED:
-                                    data = zip_ref.read(file_info.filename)
-                                elif file_info.compress_type == zipfile.ZIP_DEFLATED:
-                                    data = zlib.decompress(zip_ref.read(file_info.filename), -15)
-                                elif file_info.compress_type == zipfile.ZIP_BZIP2:
-                                    data = bz2.decompress(zip_ref.read(file_info.filename))
-                                elif file_info.compress_type == zipfile.ZIP_LZMA:
-                                    data = lzma.decompress(zip_ref.read(file_info.filename))
-                                #elif file_info.compress_type == 9:  # Custom handling for compression type 9
-                                    # Attempt extraction using 7z for unsupported compression methods
-                                    #subprocess.run(['7z', 'x', '-o' + extract_to, zip_path], check=True)
-                                else:
-                                    raise NotImplementedError(f"Unsupported compression method: {file_info.compress_type}")
-                                
-                                if data is not None:
-                                    target_path = os.path.join(extract_to, file_info.filename)
-                                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                                    with open(target_path, 'wb') as f:
-                                        f.write(data)
-                            except Exception as e:
-                                # If all methods fail, inform the user but continue with other files
-                                messagebox.showwarning("Extraction Warning", 
-                                                    f"Could not extract file '{file_info.filename}' from '{os.path.basename(zip_path)}'.\n"
-                                                    "The file may be corrupted or use an unsupported compression method.\n"
-                                                    f"Compression type: {file_info.compress_type}\n"
-                                                    "Manually unzip the file and then select the dump file.")
-                                extract_to = myUtils.select_file("DMP. ", initialDir=os.path.dirname(zip_path), fileTypeExt="*.*")
-                                
-                                # Copy contents of the unzipped directory to the new dir
-
-                
-                #print(f"Extraction of {zip_path} completed.")
-            except zipfile.BadZipFile:
-                file_name = os.path.basename(zip_path)
-                messagebox.showerror("Invalid Zip File", 
-                                    f"The file '{file_name}' is not a valid zip file or is corrupted.")
-            except Exception as e:
-                file_name = os.path.basename(zip_path)
-                messagebox.showerror("Error", f"An error occurred while extracting '{file_name}': {str(e)}")
-
         # Check primary location
-        if os.path.isdir(primary_path):
+        dmp_files = []
+        if not (case_selected == "") and os.path.isdir(case_selected):
+            # Copy contents to primary path
+            if not os.path.exists(primary_path):
+                #os.makedirs(primary_path)
+                shutil.copytree(case_selected, primary_path, dirs_exist_ok=True)
+            
             dmp_files = search_for_dmp_files(primary_path)
         elif os.path.isdir(secondary_path):
-            temp_dir = os.path.join(self.dump_base_path, case_number)
-            shutil.copytree(secondary_path, temp_dir)
-            dmp_files = search_for_dmp_files(temp_dir)
+            shutil.copytree(secondary_path, primary_path, dirs_exist_ok=True)
+            dmp_files = search_for_dmp_files(primary_path)
         else:
-            messagebox.showerror("Error", f"No directory found for case {case_number} in either location.\n\n{primary_path}\n{secondary_path}")
-
-        if dmp_files:
-            self.dmp_files.extend(dmp_files)
-            self.populate_table()
+            self.dmp_files = []
             return
-        else:
-            messagebox.showerror("Error", f"No dump files found for case {case_number} in either location.\n\n{primary_path}\n{secondary_path}")
+
+        self.dmp_files = dmp_files
+        self.populate_table()
     
-    
+    # Helper function to unzip files
+    @protect_path
+    def unzip_files(self, zip_path, extract_to):
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                for file_info in zip_ref.infolist():
+                    try:
+                        # First, try to extract using zipfile's built-in extract method
+                        zip_ref.extract(file_info, extract_to)
+                    except:# zipfile.error:
+                        # If that fails, try manual decompression
+                        try:
+                            data = None
+                            if file_info.compress_type == zipfile.ZIP_STORED:
+                                data = zip_ref.read(file_info.filename)
+                            elif file_info.compress_type == zipfile.ZIP_DEFLATED:
+                                data = zlib.decompress(zip_ref.read(file_info.filename), -15)
+                            elif file_info.compress_type == zipfile.ZIP_BZIP2:
+                                data = bz2.decompress(zip_ref.read(file_info.filename))
+                            elif file_info.compress_type == zipfile.ZIP_LZMA:
+                                data = lzma.decompress(zip_ref.read(file_info.filename))
+                            #elif file_info.compress_type == 9:  # Custom handling for compression type 9
+                                # Attempt extraction using 7z for unsupported compression methods
+                                #subprocess.run(['7z', 'x', '-o' + extract_to, zip_path], check=True)
+                            else:
+                                raise NotImplementedError(f"Unsupported compression method: {file_info.compress_type}")
+                            
+                            if data is not None:
+                                target_path = os.path.join(extract_to, file_info.filename)
+                                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                                with open(target_path, 'wb') as f:
+                                    f.write(data)
+                        except Exception as e:
+                            # If all methods fail, inform the user but continue with other files
+                            messagebox.showwarning("Extraction Warning", 
+                                                f"Could not extract file '{file_info.filename}' from '{os.path.basename(zip_path)}'.\n"
+                                                "The file may be corrupted or use an unsupported compression method.\n"
+                                                f"Compression type: {file_info.compress_type}\n"
+                                                "Manually unzip the file and then select the dump file.")
+                            extract_to = myUtils.select_file("DMP. ", initialDir=os.path.dirname(zip_path), fileTypeExt="*.*")
+                            
+                            # Copy contents of the unzipped directory to the new dir
+
+            
+            #print(f"Extraction of {zip_path} completed.")
+        except zipfile.BadZipFile:
+            file_name = os.path.basename(zip_path)
+            messagebox.showerror("Invalid Zip File", 
+                                f"The file '{file_name}' is not a valid zip file or is corrupted.")
+        except Exception as e:
+            file_name = os.path.basename(zip_path)
+            messagebox.showerror("Error", f"An error occurred while extracting '{file_name}': {str(e)}")
+
     def populate_table(self):
         # Clear existing items
         for item in self.table.get_children():
@@ -270,6 +302,8 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
         # Show the table
         self.table_frame.grid()
+        # Enable the launch buttons when dumps are loaded
+        self.launch_winDbg_button.config(state=tk.NORMAL)
 
     def setup_item_dropdowns(self, item_id):
         dump_types = ['User', 'Kernel']
@@ -303,7 +337,6 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         cell = self.table.identify('item', event.x, event.y)
         if not cell:
             return
-        
         
         column = self.table.identify_column(event.x)
         row = self.table.identify_row(event.y)
@@ -345,10 +378,10 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             return
 
         winDbg_count = sum(1 for proc in psutil.process_iter(['name']) if proc.info['name'] == 'windbg.exe')
-        max_instances = 5
+        
 
-        if winDbg_count + len(self.dmp_files) > max_instances:
-            messagebox.showwarning("Instance Limit Reached", f"Launching these dumps will exceed the instance limit ({max_instances}). \n\n You may want to close other instances of WinDbg before proceeding. \nIf not, instances will launch until they reach the limit.")
+        if winDbg_count + len(self.dmp_files) > MAX_WINDBG_INSTANCES:
+            messagebox.showwarning("Instance Limit Reached", f"Launching these dumps will exceed the instance limit ({MAX_WINDBG_INSTANCES}). \n\n You may want to close other instances of WinDbg before proceeding. \nIf not, instances will launch until they reach the limit.")
 
         for row, item in enumerate(self.table.get_children()):
             #memory_dump_path = self.table.set(item, 'File')
@@ -362,7 +395,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
             try:
                 winDbg_count = sum(1 for proc in psutil.process_iter(['name']) if proc.info['name'] == 'windbg.exe')
-                if winDbg_count < max_instances:
+                if winDbg_count < MAX_WINDBG_INSTANCES:
                     subprocess.Popen(
                         command,
                         shell=True,
@@ -372,12 +405,47 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                         stderr=subprocess.PIPE
                     )
                 else:
-                    messagebox.showwarning("Instance Limit Reached", f"Launching these dumps will exceed the instance limit ({max_instances}). Please close some instances before launching new ones.")
+                    messagebox.showwarning("Instance Limit Reached", f"Launching these dumps will exceed the instance limit ({MAX_WINDBG_INSTANCES}). Please close some instances before launching new ones.")
                     break
 
             except subprocess.CalledProcessError as e:
                 messagebox.showerror("Execution Error", f"An error occurred:\n{e.output}")
     
+    def launch_winDbg_indy(self):
+        if not self.dmp_files:
+            messagebox.showwarning("Input Error", "No dumps selected.")
+            return
+        
+        winDbg_count = sum(1 for proc in psutil.process_iter(['name']) if proc.info['name'] == 'windbg.exe')
+        if winDbg_count + 1 > MAX_WINDBG_INSTANCES:
+            messagebox.showwarning("Instance Limit Reached", f"Launching this dump will exceed the instance limit ({MAX_WINDBG_INSTANCES}). \n\n You may want to close other instances of WinDbg before proceeding. \nIf not, instances will launch until they reach the limit.")
+
+        selected_item = self.table.focus()  # Get the selected item from the table
+        if selected_item:
+            memory_dump_path = self.dmp_files[self.table.index(selected_item)]
+            dump_type = self.table.set(selected_item, 'Dump Type')
+            app_type = self.table.set(selected_item, 'App Type')
+            app_location = self.table.set(selected_item, 'App Location')
+
+            symbol_path = self.get_symbol_path(dump_type, app_type, app_location)
+            command = f'WinDbg -z {memory_dump_path} -y srv*;{symbol_path} -c "!analyze -v"'
+
+            try:
+                if winDbg_count < MAX_WINDBG_INSTANCES:
+                    subprocess.Popen(
+                        command,
+                        shell=True,
+                        text=False,
+                        cwd=self.winDbg_path,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                else:
+                    messagebox.showwarning("Instance Limit Reached", f"Launching this dump will exceed the instance limit ({MAX_WINDBG_INSTANCES}). Please close some instances before launching new ones.")
+
+            except subprocess.CalledProcessError as e:
+                messagebox.showerror("Execution Error", f"An error occurred:\n{e.output}")
+
     def get_go_global_versions(self):
         if os.path.exists(self.symbol_base_path):
             return [d for d in os.listdir(self.symbol_base_path) if os.path.isdir(os.path.join(self.symbol_base_path, d))]
