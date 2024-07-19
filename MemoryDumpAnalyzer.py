@@ -14,6 +14,7 @@
 
 from functools import wraps
 import json
+import re
 import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -91,17 +92,22 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.browse_button.grid(column=2, row=1, padx=10, pady=5, sticky='ew')
         
         # GO-Global Version
-        self.go_global_label = tk.Label(self, text="GO-Global Version: ")
-        self.go_global_label.grid(column=0, row=2, padx=10, pady=5, sticky='w')
-        
-        self.go_global_var = tk.StringVar()
-        self.go_global_combobox = ttk.Combobox(self, textvariable=self.go_global_var)
-        self.go_global_combobox['values'] = self.get_go_global_versions()
-        self.go_global_combobox.grid(column=1, row=2, padx=10, pady=5, sticky='ew')
+        # Add GO-Global version input and warning label
+        self.version_label = tk.Label(self, text="GO-Global Version:")
+        self.version_label.grid(column=0, row=2, padx=10, pady=5, sticky='e')
+
+        self.version_entry = ttk.Combobox(self, width=30)
+        self.version_entry.grid(column=1, row=2, padx=10, pady=5, sticky='ew')
+        self.version_entry['values'] = self.get_go_global_versions()
+        self.version_entry.bind("<KeyRelease>", self.validate_version)
+        self.version_entry.bind("<<ComboboxSelected>>", self.validate_version)
+
+        self.warning_label = tk.Label(self, text="", fg="red")
+        self.warning_label.grid(column=1, row=3, padx=10, pady=5, sticky='ew')
 
         # Create a frame for the table
         self.table_frame = ttk.Frame(self)
-        self.table_frame.grid(column=0, row=3, columnspan=3, padx=10, pady=10, sticky='nsew')
+        self.table_frame.grid(column=0, row=4, columnspan=3, padx=10, pady=10, sticky='nsew')
 
         # Create the table
         self.table = ttk.Treeview(self.table_frame, columns=('File', 'Dump Type', 'App Type', 'App Location'), show='headings')
@@ -116,17 +122,17 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
         # Individual launch button
         self.launch_winDbg_indy_button = tk.Button(self, text="Launch Dump", command=self.launch_winDbg_indy)
-        self.launch_winDbg_indy_button.grid(column=0, row=4, padx=10, pady=10, sticky='ew')
+        self.launch_winDbg_indy_button.grid(column=0, row=5, padx=10, pady=10, sticky='ew')
         self.launch_winDbg_indy_button.config(state=tk.DISABLED)
 
         # Launch WinDbg Button
         self.launch_winDbg_button = tk.Button(self, text="Launch All Dumps", command=self.launch_winDbg)
-        self.launch_winDbg_button.grid(column=1, row=4, padx=10, pady=10, sticky='ew')
+        self.launch_winDbg_button.grid(column=1, row=5, padx=10, pady=10, sticky='ew')
         self.launch_winDbg_button.config(state=tk.DISABLED)
 
         # Clear Table button
         self.clear_button = tk.Button(self, text="Clear Table", command=self.clear_table)
-        self.clear_button.grid(column=2, row=4, padx=10, pady=10, sticky='ew')
+        self.clear_button.grid(column=2, row=5, padx=10, pady=10, sticky='ew')
 
     def clear_table(self):
         # Clear the table
@@ -135,6 +141,16 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         # Reset the dmp_files list
         self.dmp_files = []
 
+    def validate_version(self, event):
+        version = self.version_entry.get()
+        if not re.match(r'^\d+\.\d+\.\d+\.\d{5}$', version):
+            self.warning_label.config(text="*Warning: Proper format is X.X.X.XXXXX")
+        else:
+            self.warning_label.config(text="")
+            self.check_for_symbols()
+
+    
+    
     def on_table_select(self, event):
         selected_items = self.table.selection()
         if selected_items:
@@ -473,7 +489,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
     def get_go_global_versions(self):
         versions = GOGlobal.versions
         if os.path.exists(self.symbol_base_path):
-            versions.extend([d for d in os.listdir(self.symbol_base_path) if os.path.isdir(os.path.join(self.symbol_base_path, d))])
+            versions.extend([d for d in os.listdir(self.symbol_base_path) if os.path.isdir(os.path.join(self.symbol_base_path, d)) and not d in versions])
         
         def sort_versions(version_list):
             def version_key(version):
@@ -485,7 +501,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                     # after the correctly formatted ones
                     return (1, version)
             
-            return sorted(version_list, key=version_key)
+            return sorted(version_list, key=version_key, reverse=True)
 
         return sort_versions(versions)
 
