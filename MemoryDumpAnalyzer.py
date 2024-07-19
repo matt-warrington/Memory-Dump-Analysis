@@ -1,3 +1,17 @@
+# Memory Dump Analyzer Application
+
+# This program is designed to analyze memory dump files using WinDbg. 
+# It allows users to load memory dump files, select dump types, app types, and app locations, and launch WinDbg to analyze the dumps.
+# WinDbg will be launched for each dump with the symbols necessary based on the above-mentioned fields, as well as the GO-Global version selected by the user. 
+
+# To create an executable file for this program:
+# 1. Install PyInstaller using pip: pip install pyinstaller
+# 2. Navigate to the directory containing the script (MemoryDumpAnalyzer.py) in the command line.
+# 3. Run the following command to create an executable:
+#    pyinstaller --onefile MemoryDumpAnalyzer.py
+# 4. PyInstaller will create a 'dist' folder with the executable file inside. The executable can be run independently on Windows systems.
+
+
 from functools import wraps
 import json
 import shutil
@@ -8,7 +22,6 @@ import GOGlobal
 import os
 import myUtils
 import psutil
-import tempfile
 import zipfile
 import zlib
 import bz2
@@ -23,9 +36,10 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         super().__init__()
 
         self.symbol_base_path = self.get_symbol_base_path()
+        self.symbol_base_path_backup = self.get_symbol_base_path_backup()
         self.dump_base_path = self.get_dump_base_path()
+        self.dump_base_path_backup = self.get_dump_base_path_backup()
         self.winDbg_path = self.get_winDbg_path()
-        self.shared_folder_path = self.get_backup_dump_path()
 
         self.title("Memory Dump Analyzer")
 
@@ -59,7 +73,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         return wrapper
 
     def createWidgets(self):
-        self.case_number_label = tk.Label(self, text="Case Number: ")
+        self.case_number_label = tk.Label(self, text="Add Dump(s) by Case Number: ")
         self.case_number_label.grid(column=0, row=0, padx=10, pady=5, sticky='w')
         self.case_number_entry = tk.Entry(self, width=50)
         self.case_number_entry.grid(column=1, row=0, padx=10, pady=5, sticky='ew')
@@ -77,7 +91,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
         self.browse_button.grid(column=2, row=1, padx=10, pady=5, sticky='ew')
         
         # GO-Global Version
-        self.go_global_label = tk.Label(self, text="GO-Global Version")
+        self.go_global_label = tk.Label(self, text="GO-Global Version: ")
         self.go_global_label.grid(column=0, row=2, padx=10, pady=5, sticky='w')
         
         self.go_global_var = tk.StringVar()
@@ -129,6 +143,9 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             self.launch_winDbg_indy_button.config(state=tk.DISABLED)
 
     def get_winDbg_path(self):
+        """
+        Returns the path to the WinDbg executable by checking the default path, then the config file path. If the config file path does not yet exist, the user selects a new one. 
+        """
         def check_windbg_path(path):
             return os.path.exists(os.path.join(path, "windbg.exe"))
 
@@ -181,68 +198,72 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
     @protect_path
     def find_dmp_files(self):
-        # User selects a directory
-        case_selected = ""
-        case_number = self.case_number_entry.get()
-        if case_number == "":
-            case_selected = myUtils.select_dir(initialDir=self.dump_base_path)
-            case_number = os.path.basename(case_selected)
-
-        # If the select_dir() is cancelled, don't fill out the table
-        if case_selected == "":
-            self.dmp_files = []
-            return
-        elif os.path.dirname(case_selected) != self.dump_base_path:
-            shutil.copytree(case_selected, os.path.join(self.dump_base_path, case_number), dirs_exist_ok=True) 
-
-        primary_path = os.path.join(self.dump_base_path, case_number)
-        secondary_path = os.path.join(self.shared_folder_path, case_number)
-
-        self.dmp_files = []  # Clear any previously found files
-
-        # Helper function to search for .dmp files recursively
-        def search_for_dmp_files(base_path):
+        def search_for_dmp_files(base_path, found_files=set()):
             dmp_files = []
+
             for root, dirs, files in os.walk(base_path):
                 for file in files:
                     file_lower = file.lower()
-                    
+                    full_path = os.path.join(root, file)
+                    if full_path in found_files:
+                        continue
                     if file_lower.endswith('.dmp'):
-                        dmp_files.append(os.path.join(root, file))
+                        dmp_files.append(full_path)
+                        found_files.add(full_path)
                     elif file_lower.endswith('.zip'):
-                        if not os.path.splitext(file)[0] in dirs:
-                            zip_path = os.path.join(root, file)
-                            extract_to = os.path.join(root, os.path.splitext(file)[0])
-                            self.unzip_files(zip_path, extract_to)
-                            # Search for .dmp files in the extracted folder
-                            extracted_dmp_files = search_for_dmp_files(extract_to)
-                            if extracted_dmp_files:
-                                dmp_files.extend(extracted_dmp_files)
+                        zip_base_name = os.path.splitext(file)[0]
+                        extract_to = os.path.join(root, zip_base_name)
+                        
+                        if not os.path.exists(extract_to):
+                            os.makedirs(extract_to)
+                            self.unzip_files(full_path, extract_to)
+                        
+                        dmp_files.extend(search_for_dmp_files(extract_to, found_files))
 
-                for d in dirs:
-                    if "dump" in d or "dmp" in d:
-                        dmp_files.extend(search_for_dmp_files(d))
             return dmp_files
 
-        # Check primary location
-        dmp_files = []
-        if not (case_selected == "") and os.path.isdir(case_selected):
-            # Copy contents to primary path
-            if not os.path.exists(primary_path):
-                #os.makedirs(primary_path)
-                shutil.copytree(case_selected, primary_path, dirs_exist_ok=True)
-            
-            dmp_files = search_for_dmp_files(primary_path)
-        elif os.path.isdir(secondary_path):
-            shutil.copytree(secondary_path, primary_path, dirs_exist_ok=True)
-            dmp_files = search_for_dmp_files(primary_path)
+        case_number = self.case_number_entry.get()
+        if not case_number:
+            case_selected = myUtils.select_dir(initialDir=self.dump_base_path)
+            if not case_selected:
+                self.dmp_files = []
+                return
+            case_number = os.path.basename(case_selected)
         else:
-            self.dmp_files = []
-            return
+            case_selected = ""
 
-        self.dmp_files = dmp_files
-        self.populate_table()
-    
+        primary_path = os.path.join(self.dump_base_path, case_number)
+        secondary_path = os.path.join(self.dump_base_path_backup, case_number)
+
+        if case_selected and case_selected != primary_path:
+            try:
+                shutil.copytree(case_selected, primary_path, dirs_exist_ok=True)
+            except Exception as e:
+                messagebox.showwarning(
+                    "Exception thrown",
+                    f"{type(e).__name__} when copying from {case_selected}:\n\n{str(e)}"
+                )
+
+        if not os.path.isdir(primary_path) and os.path.isdir(secondary_path):
+            try:
+                shutil.copytree(secondary_path, primary_path, dirs_exist_ok=True)
+            except Exception as e:
+                messagebox.showwarning(
+                    "Exception thrown",
+                    f"{type(e).__name__} when copying from {secondary_path}:\n\n{str(e)}"
+                )
+
+        if os.path.isdir(primary_path):
+            self.dmp_files = search_for_dmp_files(primary_path)
+
+        if self.dmp_files:
+            self.populate_table()
+        else:
+            messagebox.showwarning(
+                "No dumps found",
+                f"No dumps found in any path. \n\n{primary_path}\n{secondary_path}"
+            )
+
     # Helper function to unzip files
     @protect_path
     def unzip_files(self, zip_path, extract_to):
@@ -355,11 +376,6 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             current_value = self.table.set(row, column)
             x, y, width, height = self.table.bbox(row, column)
             
-            #combo_values = {
-            #    'Dump Type': ['User', 'Kernel'],
-            #    'App Type': ['64-bit', '32-bit'],
-            #    'App Location': ['Client', 'Server']
-            #}
             combo_values = {
                 '#2': ['User', 'Kernel'],
                 '#3': ['64-bit', '32-bit'],
@@ -393,7 +409,6 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             messagebox.showwarning("Instance Limit Reached", f"Launching these dumps will exceed the instance limit ({MAX_WINDBG_INSTANCES}). \n\n You may want to close other instances of WinDbg before proceeding. \nIf not, instances will launch until they reach the limit.")
 
         for row, item in enumerate(self.table.get_children()):
-            #memory_dump_path = self.table.set(item, 'File')
             memory_dump_path = self.dmp_files[row]
             dump_type = self.table.set(item, 'Dump Type')
             app_type = self.table.set(item, 'App Type')
@@ -456,10 +471,23 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                 messagebox.showerror("Execution Error", f"An error occurred:\n{e.output}")
 
     def get_go_global_versions(self):
+        versions = GOGlobal.versions
         if os.path.exists(self.symbol_base_path):
-            return [d for d in os.listdir(self.symbol_base_path) if os.path.isdir(os.path.join(self.symbol_base_path, d))]
-        else:
-            return GOGlobal.versions
+            versions.extend([d for d in os.listdir(self.symbol_base_path) if os.path.isdir(os.path.join(self.symbol_base_path, d))])
+        
+        def sort_versions(version_list):
+            def version_key(version):
+                try:
+                    return (0, [int(part) for part in version.split('.')])
+                except ValueError:
+                    # If conversion fails, return a tuple with 1 as the first element
+                    # This ensures incorrectly formatted versions are sorted alphabetically
+                    # after the correctly formatted ones
+                    return (1, version)
+            
+            return sorted(version_list, key=version_key)
+
+        return sort_versions(versions)
 
     def browse_file(self):
         file_path = myUtils.select_file("DMP", "*.dmp", self.dump_base_path)
@@ -472,7 +500,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
             # Add the selected file to the table
             self.populate_table()
 
-    def get_backup_dump_path(self):
+    def get_dump_base_path_backup(self):
         default_backup_path = "//supportnas.graphon.com/support/Cases"
         
         if not os.path.exists(CONFIG_FILE_PATH):
@@ -487,7 +515,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                 json.dump(config, config_file)
             return new_path
         else:
-            # Read the symbol path from the config file
+            # Read the dump path from the config file
             with open(CONFIG_FILE_PATH, 'r') as config_file:
                 config = json.load(config_file)
 
@@ -499,6 +527,35 @@ class MemoryDumpAnalyzerApp(tk.Tk):
                     json.dump(config, config_file)
             
             return dump_path
+        
+    def get_symbol_base_path_backup(self):
+        default_backup_path = "//qnapnas.graphon.com/Builds/"
+        
+        if not os.path.exists(CONFIG_FILE_PATH):
+            # First run, set the default symbol path
+            if os.path.exists(default_backup_path):
+                new_path = default_backup_path
+            else:
+                new_path = myUtils.select_dir("Select a secondary path for finding symbols...")
+
+            config = {"backup_symbol_path": new_path}
+            with open(CONFIG_FILE_PATH, 'w') as config_file:
+                json.dump(config, config_file)
+            return new_path
+        else:
+            # Read the symbol path from the config file
+            with open(CONFIG_FILE_PATH, 'r') as config_file:
+                config = json.load(config_file)
+
+            symbol_path = config.get("backup_symbol_path", "")
+            if symbol_path == "" or not os.path.exists(symbol_path):
+                symbol_path = myUtils.select_dir("Select a secondary path for finding symbols...")
+                config["backup_symbol_path"] = symbol_path
+                with open(CONFIG_FILE_PATH, 'w') as config_file:
+                    json.dump(config, config_file)
+            
+            return symbol_path
+
     def get_symbol_base_path(self):
         if not os.path.exists(CONFIG_FILE_PATH):
             # First run, set the default symbol path
@@ -547,36 +604,55 @@ class MemoryDumpAnalyzerApp(tk.Tk):
 
     def get_symbol_path(self, dump_type, app_type, app_location):
         gg_version = self.go_global_var.get()
-        if not gg_version or gg_version == "":
+        if not gg_version:
             return ""
 
         dump_type_path = "AttestationSigning_DisplayAudioDriver/DisplayDriver" if dump_type == "Kernel" else ""
         app_type_path = "devKit-x64Release" if app_type == "64-bit" else "devKit-Win32Release"
         app_location_path = app_location.lower()
 
-        symbol_path = f"{self.symbol_base_path}/{gg_version}/"
-        if len(dump_type_path) > 0:
-            symbol_path += dump_type_path
+        symbol_path = os.path.join(self.symbol_base_path, gg_version)
+        if dump_type_path:
+            symbol_path = os.path.join(symbol_path, dump_type_path)
         else:
-            symbol_path += f"{app_type_path}/Release/{app_location_path}"
+            symbol_path = os.path.join(symbol_path, app_type_path, "Release", app_location_path)
 
-        # Check if the path is a .zip file and unzip it if necessary
-        if symbol_path.endswith('.zip') and os.path.isfile(symbol_path):
-            with zipfile.ZipFile(symbol_path, 'r') as zip_ref:
-                temp_dir = tempfile.mkdtemp()
-                zip_ref.extractall(temp_dir)
-                symbol_path = temp_dir
+        if myUtils.unzip_path(symbol_path):
+            return symbol_path
+        elif self.get_symbols_from_backup_path(gg_version):
+            if os.path.exists(symbol_path):
+                return symbol_path
+        
+        messagebox.showwarning("Path Not Found", f"No symbols found at {symbol_path}. \n\nPlease find the symbols you are looking for and upload the path here.")
+        return ""
 
-        if not os.path.exists(symbol_path):
-            messagebox.showwarning("Path Not Found", f"No symbols found at {symbol_path}. \n\nPlease find the symbols you are looking for and upload the path here.")
-            new_symbol_path = filedialog.askdirectory(title="Select Path of Symbols")
-            if new_symbol_path:
-                return new_symbol_path
-            else:
-                messagebox.showinfo("Proceeding Without Symbols", "No new path selected. Proceeding without additional symbols.")
-                return ""
+    def get_symbols_from_backup_path(self, version):
+        """
+        Search for a directory named version by traversing the directory tree directly.
+        """
 
-        return symbol_path
+        root_path = self.symbol_base_path_backup
+        
+        # Extract the major, minor, patch, and build numbers from the version string
+        parts = version.split('.')
+        if len(parts) != 4:
+            print("Invalid version format. Please provide version in the form of x.x.x.xxxxx")
+            return None
+
+        major_minor_patch = '.'.join(parts[:3])
+        build = int(parts[3])
+
+        # Determine the subdirectory range
+        subdirectory_range = f"{(build // 100) * 100}-{(build // 100) * 100 + 99}"
+
+        # Construct the expected path
+        expected_path = os.path.join(root_path, major_minor_patch, subdirectory_range, version)
+
+        if os.path.isdir(expected_path):
+            shutil.copytree(expected_path, self.symbol_base_path)
+            return myUtils.unzip_path(self.symbol_base_path)
+        else:
+            return False
 
 
 if __name__ == "__main__":

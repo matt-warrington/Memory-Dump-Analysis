@@ -1,3 +1,4 @@
+from functools import wraps
 import tkinter as tk
 from tkinter import filedialog
 import zipfile
@@ -150,6 +151,47 @@ def convert_response_to_dict(response_txt):
     except json.JSONDecodeError as e:
         print(f"Error converting response to dict: {e}")
         return {}
+
+def protect_network_path(func):
+        '''
+        The point of this is to prevent certain functions (e.g. unzip_files()) from running on network folders.
+        '''
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            # Would the check for "//" be enough to ensure we can't run an operation on a network path?
+            for arg in args:
+                if isinstance(arg, str) and arg.startswith("//"):
+                     raise PermissionError(f"Operation not allowed on protected path: {arg}")
+
+            return func(self, *args, **kwargs)
+        return wrapper
+
+@protect_network_path
+def unzip_path(path):
+    """
+    Ensure that all zip files in the given path are unzipped.
+
+    Returns:
+        True - Succeeded.
+        False - Failed to find path.
+    """
+    path_parts = path.split(os.sep)
+    current_path = path_parts[0] + os.sep
+    path_parts = path_parts[1:]
+    
+
+    for part in path_parts:
+        current_path = os.path.join(current_path, part)
+        if not os.path.exists(current_path):
+            zip_path = current_path + ".zip"
+            if os.path.isfile(zip_path) :
+                # Unzip the file
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(os.path.dirname(current_path))
+            else:
+                return False
+
+    return True
 
 def main():
     #Testing
