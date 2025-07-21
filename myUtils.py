@@ -9,11 +9,11 @@ import requests
 
 
 def https_get(url: str):
+    """Return JSON response from an HTTPS GET request as a dictionary."""
     try:
-        response_txt = requests.get(url)
-        response_json = response_txt.json()
-        response_dict = convert_response_to_dict(response_json)
-        return response_dict
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
     except requests.RequestException as e:
         print(f"There was an exception in GET request to {url}:")
         print(f"\tException: {e}")
@@ -111,19 +111,13 @@ def copy_file_contents(path, newPath):
         txt_file.write(contents)
 
 def convert_response_to_dict(response_txt):
-    """
-    Converts a JSON response string to a dictionary.
-    
-    Args:
-        response_txt (str): The response text from the HTTP request.
-    
-    Returns:
-        dict: The response text converted to a dictionary.
-    """
+    """Convert a JSON string or mapping to a dictionary."""
+    if isinstance(response_txt, dict):
+        return response_txt
+
     try:
-        response_txt = re.sub(r'(\w+):', r'"\1":', response_txt)  # Replace single quotes with double quotes to ensure the JSON format
-        license_dict = json.loads(response_txt)  # Convert the string to a dictionary
-        return license_dict
+        response_txt = re.sub(r'(\w+):', r'"\1":', response_txt)
+        return json.loads(response_txt)
     except json.JSONDecodeError as e:
         print(f"Error converting response to dict: {e}")
         return {}
