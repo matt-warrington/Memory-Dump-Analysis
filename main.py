@@ -14,6 +14,7 @@ class MemoryDumpAnalyzerApp(tk.Tk):
     Methods:
     - __init__: Initializes the MemoryDumpAnalyzerApp class and sets up the GUI layout.
     - createWidgets: Creates all the necessary widgets for the GUI.
+    - run_command: Executes a WinDbg command entered in the GUI.
     - browse_file: Opens a file dialog for browsing memory dump files.
     - get_symbol_path: Generates the symbol path based on selected parameters.
     - analyze: Analyzes the memory dump using specified parameters and displays the output.
